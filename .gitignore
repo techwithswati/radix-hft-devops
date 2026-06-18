@@ -1,0 +1,43 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+
+# Helm
+helm/trading-platform/charts/
+helm/**/*.tgz
+
+# Secrets
+**/secret*.yaml
+**/secrets*.yaml
+*.pem
+*.key
+*.crt
+.env
+.env.*
+!.env.example
+kubeconfig
+*.kubeconfig
+
+# k6
+k6-tests/results/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Go / Python build
+vendor/
+__pycache__/
+*.pyc
+
+# Build artifacts
+dist/
+build/
+bin/
+trivy-results*.sarif
+*.log
