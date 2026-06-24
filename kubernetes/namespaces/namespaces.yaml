@@ -1,0 +1,129 @@
+---
+# Trading namespace - production workloads
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trading
+  labels:
+    app.kubernetes.io/part-of: radix-hft
+    environment: production
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.30
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Monitoring namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: radix-hft
+    pod-security.kubernetes.io/enforce: baseline
+
+---
+# ArgoCD namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/part-of: radix-hft
+    pod-security.kubernetes.io/enforce: baseline
+
+---
+# Istio system
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+
+---
+# Karpenter
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: karpenter
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+
+---
+# External Secrets Operator
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+
+---
+# KEDA
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keda
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+
+---
+# Falco
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+
+---
+# Resource Quotas - trading namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: trading-quota
+  namespace: trading
+spec:
+  hard:
+    requests.cpu: "80"
+    requests.memory: "160Gi"
+    limits.cpu: "160"
+    limits.memory: "320Gi"
+    requests.nvidia.com/gpu: "0"
+    persistentvolumeclaims: "20"
+    services.loadbalancers: "0"  # Use Istio/ALB ingress only
+    pods: "200"
+    hugepages-2Mi: "4Gi"
+
+---
+# LimitRange - trading namespace
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: trading-limits
+  namespace: trading
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "8"
+        memory: 32Gi
+      min:
+        cpu: 50m
+        memory: 64Mi
+    - type: Pod
+      max:
+        cpu: "16"
+        memory: 64Gi
+    - type: PersistentVolumeClaim
+      max:
+        storage: "500Gi"
+      min:
+        storage: "1Gi"

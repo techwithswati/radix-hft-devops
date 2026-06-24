@@ -238,7 +238,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, branch strategy
 
 2026 Swati. Shared for portfolio purposes - not open source.
 Interested in working together? Reach out before using any part of this project.
-See [LICENSE](LICENSE) for full terms.
+See [LicenseRef-Portfolio](LicenseRef-Portfolio) for full terms.
 
 ---
 
