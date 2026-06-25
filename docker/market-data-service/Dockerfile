@@ -6,7 +6,7 @@
 
 # ── Stage 1: Dependency cache (cargo-chef) ────────────────
 FROM rust:1.78-alpine3.20 AS chef
-RUN apk add --no-cache musl-dev && cargo install cargo-chef --locked
+RUN apk add --no-cache musl-dev=1.2.5_git20240514-r0 && cargo install cargo-chef --locked
 WORKDIR /app
 
 FROM chef AS planner
@@ -19,7 +19,7 @@ ARG BUILD_DATE
 ARG GIT_COMMIT
 ARG VERSION
 
-RUN apk add --no-cache musl-dev openssl-dev pkgconfig
+RUN apk add --no-cache musl-dev=1.2.5_git20240514-r0 openssl-dev=3.2.2-r0 pkgconfig=2.3.0-r0
 
 COPY --from=planner /app/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

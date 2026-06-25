@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.9
 ##############################################################
-# Radix HFT - Order Service
+# Radix HFT — Order Service
 # Multi-stage build: Go 1.22 binary, distroless runtime
 # Target: < 10ms cold start, < 5MB image
 ##############################################################
@@ -19,7 +19,7 @@ ARG GIT_COMMIT
 ARG VERSION
 
 # Build dependencies (static binary, no CGO)
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache git=2.42.0-r0 ca-certificates=20240705-r0 tzdata=2024b-r0
 
 WORKDIR /app
 
@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags="-s -w \
         -X main.Version=${VERSION} \
         -X main.GitCommit=${GIT_COMMIT} \
-        -X main.BuildDate=${BUILD_DATE} \
+        -X main.BuildDate=${BUILD_DATE}" \
       -o /bin/order-service \
       ./cmd/order-service
 
@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN /bin/order-service --version
 
 # ── Stage 3: Security scan ─────────────────────────────────
-FROM aquasec/trivy:latest AS trivy-scan
+FROM aquasec/trivy:0.50.0 AS trivy-scan
 COPY --from=builder /bin/order-service /bin/order-service
 RUN trivy rootfs --no-progress --exit-code 0 --severity HIGH,CRITICAL /
 

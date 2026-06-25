@@ -17,7 +17,7 @@ ARG BUILD_DATE
 ARG GIT_COMMIT
 ARG VERSION
 
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache git=2.42.0-r0 ca-certificates=20240705-r0 tzdata=2024b-r0
 
 WORKDIR /app
 COPY --from=modules /go/pkg/mod /go/pkg/mod
@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN /bin/api-gateway --version
 
 # ── Stage 3: Security scan ─────────────────────────────────
-FROM aquasec/trivy:latest AS trivy-scan
+FROM aquasec/trivy:0.50.0 AS trivy-scan
 COPY --from=builder /bin/api-gateway /bin/api-gateway
 RUN trivy rootfs --no-progress --exit-code 0 --severity HIGH,CRITICAL /
 
