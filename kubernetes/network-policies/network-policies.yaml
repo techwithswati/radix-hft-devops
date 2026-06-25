@@ -1,0 +1,284 @@
+##############################################################
+# Radix HFT — Network Policies (Zero-Trust)
+# Default-deny all, allow only required communication paths
+##############################################################
+
+---
+# DEFAULT DENY ALL — trading namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: trading
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow: order-service → risk-engine (gRPC)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: order-service-to-risk-engine
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: risk-engine
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: order-service
+      ports:
+        - protocol: TCP
+          port: 9003  # gRPC
+
+---
+# Allow: api-gateway → order-service (HTTP + gRPC)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-gateway-to-order-service
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: order-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8080  # HTTP
+        - protocol: TCP
+          port: 9000  # gRPC
+
+---
+# Allow: api-gateway → market-data-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-gateway-to-market-data
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: market-data-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8081  # HTTP
+        - protocol: TCP
+          port: 8082  # WebSocket
+
+---
+# Allow: api-gateway → risk-engine (read-only risk summary)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-gateway-to-risk-engine
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: risk-engine
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8083  # HTTP
+
+---
+# Allow: monitoring namespace → trading (Prometheus scrape)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: trading
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9091
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 9000
+
+---
+# Allow: ingress controller → api-gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api-gateway
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# Allow: order-service egress to data tier + risk-engine + DNS + AWS API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: order-service-egress
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: order-service
+  policyTypes:
+    - Egress
+  egress:
+    # Aurora PostgreSQL (via VPC)
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # Kafka MSK (TLS + IAM)
+    - ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: TCP
+          port: 9098
+    # Risk engine (gRPC)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: risk-engine
+    - ports:
+        - protocol: TCP
+          port: 9003
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # AWS API (Secrets Manager, STS, etc. via VPC endpoints)
+    - ports:
+        - protocol: TCP
+          port: 443
+
+---
+# Allow: market-data-service egress to Kafka + external feeds + DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: market-data-service-egress
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels:
+      app: market-data-service
+  policyTypes:
+    - Egress
+  egress:
+    # Kafka MSK
+    - ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: TCP
+          port: 9098
+    # External market data feeds (NASDAQ, CME, NYSE — HTTPS/WSS)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Allow: Istio sidecar communication (all pods)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-istio-sidebar
+  namespace: trading
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+
+---
+# Allow: External Secrets Operator → AWS Secrets Manager (via VPC endpoint)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-egress-secrets
+  namespace: external-secrets
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
