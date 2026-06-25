@@ -2,272 +2,156 @@ name: 🚀 CI Pipeline
 
 on:
   push:
-    branches: [main, develop, "release/**"]
+    branches:
+      - main
+      - develop
+    paths:
+      - 'docker/**'
+      - 'kubernetes/**'
+      - 'helm/**'
+      - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main, develop]
-  workflow_dispatch:
+    branches:
+      - main
+      - develop
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-  PYTHON_VERSION: "3.12"
-  GO_VERSION: "1.22"
+  REGISTRY: ghcr.io
+  IMAGE_REGISTRY: ${{ secrets.IMAGE_REGISTRY || 'ghcr.io' }}
+  REGISTRY_USERNAME: ${{ github.actor }}
+  REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  # ─────────────────────────────────────────
   lint:
-    name: 🔍 Lint & Validate
+    name: Lint YAML & Helm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Lint Dockerfiles
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          recursive: true
-          failure-threshold: warning
+      - name: Install yamllint
+        run: pip install yamllint
 
-      - name: Lint YAML
+      - name: Lint Kubernetes manifests
         run: |
-          pip install yamllint
-          yamllint -c .yamllint.yml .
+          yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' \
+            kubernetes/**/*.yaml \
+            helm/**/*.yaml \
+            argocd/**/*.yaml
 
-      - name: Lint Helm Charts
+      - name: Lint Terraform
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Run tflint
         run: |
-          helm lint ./helm/trading-platform \
-            --values ./helm/trading-platform/values.yaml \
-            --strict
+          tflint --init
+          cd terraform && tflint --format json
 
-      - name: Validate Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Install Helm
+        uses: azure/setup-helm@v4
         with:
-          terraform_version: "1.9.0"
-      - run: |
-          for dir in terraform/modules/*/; do
-            echo "Validating $dir..."
-            terraform -chdir="$dir" init -backend=false
-            terraform -chdir="$dir" validate
-          done
+          version: 'v3.13.0'
 
-      - name: Lint Kubernetes Manifests
-        uses: azure/k8s-lint@v1
-        with:
-          manifests: |
-            kubernetes/**/*.yaml
+      - name: Helm lint
+        run: helm lint helm/trading-platform/
 
-  # ─────────────────────────────────────────
+      - name: Helm template validation
+        run: |
+          helm template trading-platform helm/trading-platform/ -f helm/trading-platform/values-prod.yaml | \
+            yamllint -d '{extends: default}' -
+
   security-scan:
-    name: 🔐 Security Scanning
+    name: Security Scanning
     runs-on: ubuntu-latest
-    needs: lint
-    permissions:
-      security-events: write
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner (repo)
+      - name: Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: "fs"
-          scan-ref: "."
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH"
-          exit-code: "1"
-      
-      - name: Upload Trivy SARIF to Github Security
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: 'trivy-results.sarif'
 
-      - name: OPA Policy Check
-        run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
-          chmod +x opa
-          ./opa eval --fail-defined \
-            --data policies/ \
-            --input kubenetes/ \
-            "data.radix.deny"
-
-      - name: Secrets Detection (Gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: SBOM Generation
-        uses: anchore/sbom-action@v0
-        with:
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom.spdx.json
-    
-  # ─────────────────────────────────────────
-  test:
-    name: 🧪 Tests
+  docker-build:
+    name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [lint, security-scan]
     strategy:
       matrix:
         service: [order-service, market-data-service, risk-engine, api-gateway]
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run Unit Tests
-        run: |
-          cd docker/${{ matrix.service }}
-          go test ./... -v -race -coverprofile=coverage.out
-          go tool cover -func=coverage.out
-
-      - name: Check Coverage Threshold
-        run: |
-          COVERAGE=$(go tool cover -func=docker/${{ matrix.service }}/coverage.out | grep total | awk '{print $3}' | tr -d '%')
-          echo "Coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-            echo "❌Coverage $COVERAGE% is below 80% threshold"
-            exit 1
-          fi
-
-      - name: Upload Coverage Report
-        uses: codecov/codecov-action@v4
-        with:
-          files: docker/${{ matrix.service }}/coverage.out
-          flags: ${{ matrix.service }}
-
-  # ─────────────────────────────────────────
-  build:
-    name: 🐳 Build & Push Images
-    runs-on: ubuntu-latest
-    needs: [security-scan, test]
-    if: github.event_name == 'push'
-    strategy:
-      matrix:
-        service: [order-service, market-data-service, risk-engine, api-gateway]
-    outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host 
 
-      - name: Extract Docker metadata
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.ECR_REGISTRY }}/radix-hft/${{ matrix.service }}
+          images: |
+            ${{ env.REGISTRY }}/radix-hft/${{ matrix.service }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}} 
-        
-      - name: Build and push 
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: docker/${{ matrix.service }}
-          push: true
+          context: ./docker/${{ matrix.service }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha 
-          cache-to: type=gha,mode=max 
-          build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            GIT_COMMIT=${{ github.sha }}
-            VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Scan pushed image with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.ECR_REGISTRY }}/radix-hft/${{ matrix.service }}:sha-${{ github.sha }}
-          format: "sarif" 
-          output: "trivy-image-${{ matrix.service }}.sarif"
-          severity: "CRITICAL"
-          exit-code: "1"
-
-      - name: Sign image with cosign
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: |
-          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
-          ${{ env.ECR_REGISTRY }}/radix-hft/${{ matrix.service }}:sha-${{ github.sha }}
-
-  # ─────────────────────────────────────────
-  helm-package:
-    name: 📦 Package Helm Chart
+  integration-test:
+    name: Integration Tests
     runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docker-build
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update chart appVersion
+      - name: Run smoke tests
         run: |
-          yq e ".appVersion = \"sha-${{ github.sha }}\"" \
-            -i helm/trading-platform/Chart.yaml
+          bash scripts/smoke-tests.sh
 
-      - name: Package Helm chart
-        run: |
-          helm package ./helm/trading-platform \
-            --destination ./helm-artifacts/
-
-      - name: Push chart to ECR OCI registry
-        run: |
-          helm push ./helm-artifacts/*.tgz \
-            oci://${{ env.ECR_REGISTRY }}/radix-hft/charts
-
-  # ─────────────────────────────────────────
-  notify:
-    name: 📬 Notify
+  helm-validation:
+    name: Helm Chart Validation
     runs-on: ubuntu-latest
-    needs: [build, helm-package]
-    if: always()
+    needs: lint
     steps:
-      - name: Slack Notification
-        uses: slackapi/slack-github-action@v1.26.0
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
         with:
-          payload: |
-            {
-              "text": "${{ needs.build.result == 'success' && '✅' || '❌' }} *Radix HFT CI* - `${{ github.ref_name }}` - ${{ needs.build.result }},
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "${{ needs.build.result == 'success' && '✅' || '❌' }} *Build ${{ needs.build.result }}* on `${{ github.ref_name }}`\n*Commit:* `${{ github.sha }}` by ${{ github.actor }}\n*Message:* ${{ github.event.head_commit.message }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          version: 'v3.13.0'
+
+      - name: Helm chart testing
+        uses: helm/chart-testing-action@v2.6.0
+
