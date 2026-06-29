@@ -1,0 +1,239 @@
+{
+  "title": "Radix HFT — Infrastructure",
+  "uid": "radix-hft-infrastructure",
+  "description": "EKS nodes, Kafka, Aurora, Redis, storage utilization",
+  "tags": ["radix-hft", "infrastructure", "kubernetes"],
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Node CPU Utilization",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "orange", "value": 0.75 },
+              { "color": "red",    "value": 0.90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "infra:node:cpu_utilization_avg",
+          "legendFormat": "{{ node }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Node Memory Utilization",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "orange", "value": 80 },
+              { "color": "red",    "value": 90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "infra:node:memory_utilization_pct",
+          "legendFormat": "{{ instance }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Pod Restarts (15m)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red",   "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace='trading'}[15m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Aurora CPU",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "orange", "value": 70 },
+              { "color": "red",    "value": 85 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "aws_rds_cpuutilization_average",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Redis Memory",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "orange", "value": 70 },
+              { "color": "red",    "value": 85 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "aws_elasticache_database_memory_usage_percentage_average",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Kafka Under-Replicated",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red",   "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(kafka_server_replicamanager_underreplicatedpartitions)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Node Count by Role",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": { "orientation": "horizontal" },
+      "targets": [
+        {
+          "expr": "count by(label_role) (kube_node_labels)",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "CPU Throttling Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "infra:pod:cpu_throttling_rate",
+          "legendFormat": "{{ pod }} - {{ namespace }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Persistent Volume Usage",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Used %" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "orange", "value": 0.75 }, { "color": "red", "value": 0.90 }] } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes",
+          "instant": true,
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "persistentvolumeclaim": "PVC",
+              "Value": "Used %"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

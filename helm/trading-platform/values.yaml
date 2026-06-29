@@ -1,0 +1,270 @@
+##############################################################
+# Radix HFT Trading Platform — Helm Chart Values
+# Default values for all services across all environments
+# Override with values-{dev,staging,prod}.yaml per environment
+##############################################################
+
+global:
+  # Image registry and tag
+  imageRegistry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+  imageTag: "latest"  # Override per environment
+  imagePullPolicy: IfNotPresent
+
+  # Environment
+  environment: staging
+
+  # Kafka configuration
+  kafkaBrokers: "kafka:9094"
+
+  # Database
+  dbHost: "aurora.us-east-1.rds.amazonaws.com"
+  dbPort: 5432
+  dbName: "radix_hft"
+
+  # Redis
+  redisHost: "redis.elasticache.amazonaws.com"
+  redisPort: 6379
+
+##############################################################
+# Order Service
+##############################################################
+orderService:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    repository: "radix-hft/order-service"
+    tag: ""  # Uses global.imageTag
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  config:
+    maxOrderPerSecond: 100000
+    orderTimeoutMs: 50
+    riskCheckEnabled: true
+    journalingEnabled: true
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+  affinity:
+    podAffinity: preferred
+
+  tolerations: []
+
+  nodeSelector:
+    role: trading-critical
+
+##############################################################
+# Market Data Service
+##############################################################
+marketDataService:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    repository: "radix-hft/market-data-service"
+    tag: ""
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 16Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 75
+
+  config:
+    bufferSize: 1000000
+    snapshotIntervalMs: 100
+
+  nodeSelector:
+    role: market-data
+
+##############################################################
+# Risk Engine
+##############################################################
+riskEngine:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: "radix-hft/risk-engine"
+    tag: ""
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  config:
+    maxPositionUSD: 50000000
+    maxDailyLossUSD: 5000000
+    maxOrderSizeUSD: 1000000
+    varConfidenceLevel: 0.99
+    riskCheckTimeoutMs: 5
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  nodeSelector:
+    role: trading-critical
+
+##############################################################
+# API Gateway
+##############################################################
+apiGateway:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    repository: "radix-hft/api-gateway"
+    tag: ""
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+  rateLimiting:
+    requestPerSecond: 10000
+    burstSize: 50000
+
+  ingress:
+    enabled: true
+    className: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+    hosts:
+      - host: api.radix-hft.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      enabled: true
+      secretName: api-tls
+
+##############################################################
+# Rollout Strategy
+##############################################################
+rollout:
+  strategy: canary
+  steps:
+    - setWeight: 5
+    - pause:
+        duration: 5m
+    - analysis:
+        templates:
+          - templateName: error-rate
+          - templateName: latency-p99
+    - setWeight: 25
+    - pause:
+        duration: 10m
+    - analysis:
+        templates:
+          - templateName: error-rate
+          - templateName: latency-p99
+    - setWeight: 100
+
+##############################################################
+# Networking
+##############################################################
+networkPolicies:
+  enabled: true
+
+serviceMesh:
+  enabled: true
+  provider: istio
+  mTLS: STRICT
+
+##############################################################
+# Observability
+##############################################################
+prometheus:
+  enabled: true
+  scarpeInterval: 30s
+
+grafana:
+  enabled: true
+  dashboards:
+    - trading-operations
+    - infrastructure
+
+prometheusRules:
+  enabled: true
+
+##############################################################
+# Security
+##############################################################
+podSecurityPolicy:
+  enabled: false  # Using Pod Security Standards instead
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: ""
+
+##############################################################
+# Secrets & Configuration
+##############################################################
+externalSecrets:
+  enabled: true
+  refreshInterval: 1h
+  secretStore: aws-secrets-manager
+
+##############################################################
+# Advanced Configuration
+##############################################################
+priorityClass:
+  create: true
+  name: trading-critical
+  value: 1000000
+  globalDefault: false
+
+affinity:
+  nodeaffinity:
+    requiredDuringScheduling: true
+  podAffinity: soft
+  podAntiAffinity: hard
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone

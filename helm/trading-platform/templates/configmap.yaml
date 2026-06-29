@@ -1,0 +1,87 @@
+{{- $env := .Values.global.environment | default "staging" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+data:
+  MAX_ORDERS_PER_SECOND: {{ .Values.orderService.config.maxOrdersPerSecond | default 100000 | quote }}
+  ORDER_TIMEOUT_MS: {{ .Values.orderService.config.orderTimeoutMs | default 50 | quote }}
+  RISK_CHECK_ENABLED: {{ .Values.orderService.config.riskCheckEnabled | default true | quote }}
+  JOURNALING_ENABLED: {{ .Values.orderService.config.journalingEnabled | default true | quote }}
+  ENVIRONMENT: {{ $env | quote }}
+  LOG_LEVEL: {{ if eq $env "prod" }}"warn"{{ else }}"info"{{ end }}
+  OTEL_SERVICE_NAME: "order-service"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring:4317"
+  DB_HOST: {{ .Values.global.dbHost | quote }}
+  DB_PORT: {{ .Values.global.dbPort | quote }}
+  DB_NAME: {{ .Values.global.dbName | quote }}
+  KAFKA_BROKERS: {{ .Values.global.kafkaBrokers | quote }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: market-data-service-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+data:
+  BUFFER_SIZE: {{ .Values.marketDataService.config.bufferSize | default 1000000 | quote }}
+  SNAPSHOT_INTERVAL_MS: {{ .Values.marketDataService.config.snapshotIntervalMs | default 100 | quote }}
+  ENVIRONMENT: {{ $env | quote }}
+  LOG_LEVEL: {{ if eq $env "prod" }}"warn"{{ else }}"info"{{ end }}
+  OTEL_SERVICE_NAME: "market-data-service"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring:4317"
+  KAFKA_BROKERS: {{ .Values.global.kafkaBrokers | quote }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: risk-engine-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+data:
+  MAX_POSITION_USD: {{ .Values.riskEngine.config.maxPositionUSD | default 50000000 | quote }}
+  MAX_DAILY_LOSS_USD: {{ .Values.riskEngine.config.maxDailyLossUSD | default 5000000 | quote }}
+  MAX_ORDER_SIZE_USD: {{ .Values.riskEngine.config.maxOrderSizeUSD | default 1000000 | quote }}
+  VAR_CONFIDENCE_LEVEL: {{ .Values.riskEngine.config.varConfidenceLevel | default 0.99 | quote }}
+  RISK_CHECK_TIMEOUT_MS: {{ .Values.riskEngine.config.riskCheckTimeoutMs | default 5 | quote }}
+  ENVIRONMENT: {{ $env | quote }}
+  LOG_LEVEL: {{ if eq $env "prod" }}"warn"{{ else }}"info"{{ end }}
+  OTEL_SERVICE_NAME: "risk-engine"
+  KAFKA_BROKERS: {{ .Values.global.kafkaBrokers | quote }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+data:
+  RATE_LIMIT_RPS: {{ .Values.apiGateway.rateLimiting.requestsPerSecond | default 10000 | quote }}
+  BURST_SIZE: {{ .Values.apiGateway.rateLimiting.burstSize | default 50000 | quote }}
+  ENVIRONMENT: {{ $env | quote }}
+  LOG_LEVEL: {{ if eq $env "prod" }}"warn"{{ else }}"info"{{ end }}
+  OTEL_SERVICE_NAME: "api-gateway"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring:4317"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+data:
+  brokers: {{ .Values.global.kafkaBrokers | quote }}
+  topics.orders: "orders"
+  topics.executions: "executions"
+  topics.risk-events: "risk-events"
+  topics.market-data: "market-data"
+  topics.audit: "audit-log"
+  security.protocol: "SSL"
+  sasl.mechanism: "AWS_MSK_IAM"

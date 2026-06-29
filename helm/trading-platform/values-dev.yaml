@@ -1,0 +1,86 @@
+global:
+  imageTag: "latest"
+  environment: dev
+  kafkaBrokers: "kafka-dev:9094"
+  dbHost: "aurora-dev.us-east-1.rds.amazonaws.com"
+  dbPort: 5432
+  dbName: "radix_hft_dev"
+  redisHost: "redis-dev.cache.amazonaws.com"
+  redisPort: 6379
+
+orderService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+  config:
+    maxOrdersPerSecond: 1000
+    riskCheckEnabled: true
+
+marketDataService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+  autoscaling:
+    enabled: false
+
+riskEngine:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+apiGateway:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.dev.radix-hft.internal
+        paths:
+          - path: /
+            pathType: Prefix
+
+rollout:
+  strategy: blueGreen
+
+networkPolicies:
+  enabled: false
+
+serviceMesh:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+prometheusRules:
+  enabled: false
+
+priorityClass:
+  create: false
+
+topologySpreadConstraints:
+  enabled: false

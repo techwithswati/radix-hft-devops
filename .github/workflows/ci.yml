@@ -37,10 +37,9 @@ jobs:
 
       - name: Lint Kubernetes manifests
         run: |
-          yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' \
-            kubernetes/**/*.yaml \
-            helm/**/*.yaml \
-            argocd/**/*.yaml
+          yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' kubernetes/
+          yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' helm/
+          yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' argocd/
 
       - name: Lint Terraform
         uses: terraform-linters/setup-tflint@v4
@@ -72,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.15.0
         with:
           scan-type: 'fs'
           scan-ref: '.'

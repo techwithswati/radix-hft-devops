@@ -1,0 +1,263 @@
+name: Security Scan
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-fs-scan:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          skip-dirs: 'node_modules,vendor,.git'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-fs'
+
+  trivy-docker-scan:
+    name: Trivy Docker Image Scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - 'ghcr.io/radix-hft/order-service:latest'
+          - 'ghcr.io/radix-hft/market-data-service:latest'
+          - 'ghcr.io/radix-hft/risk-engine:latest'
+          - 'ghcr.io/radix-hft/api-gateway:latest'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.image }}
+          format: 'sarif'
+          output: 'trivy-image-${{ matrix.image }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-${{ matrix.image }}.sarif'
+          category: 'trivy-image-${{ matrix.image }}'
+
+  gitleaks-scan:
+    name: GitLeaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        with:
+          source: 'https://github.com/${{ github.repository }}'
+          verbose: true
+          redirect-url: 'https://docs.gitleaks.io/usage/redact'
+
+  snyk-scan:
+    name: Snyk Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Snyk scan
+        uses: snyk/actions/docker@master
+        with:
+          image: ghcr.io/radix-hft/order-service:latest
+          args: --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  cosign-verify:
+    name: Cosign Image Signature Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.0'
+
+      - name: Verify image signatures
+        run: |
+          for image in order-service market-data-service risk-engine api-gateway; do
+            cosign verify \
+              --certificate-identity-regexp="https://github.com/radix-hft/radix-hft-devops" \
+              --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+              ghcr.io/radix-hft/$image:latest || echo "Signature verification failed for $image"
+          done
+        continue-on-error: true
+
+  sbom-generate:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+        with:
+          syft-version: 'v0.88.0'
+
+      - name: Generate SBOM for images
+        run: |
+          for image in order-service market-data-service risk-engine api-gateway; do
+            syft \
+              ghcr.io/radix-hft/$image:latest \
+              -o spdx-json \
+              > sbom-$image.json
+          done
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-artifacts
+          path: sbom-*.json
+
+  container-structure-test:
+    name: Container Structure Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [order-service, market-data-service, risk-engine, api-gateway]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run container-structure-test
+        run: |
+          docker run -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            googlecontainertools/container-structure-test test \
+            --image ghcr.io/radix-hft/${{ matrix.service }}:latest \
+            --config docker/${{ matrix.service }}/structure-test.yaml
+
+  helm-security-scan:
+    name: Helm Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.13.0'
+
+      - name: Install Trivy for Helm
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Scan Helm chart
+        run: |
+          trivy config helm/trading-platform/ \
+            --format sarif \
+            --output helm-trivy-results.sarif
+
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'helm-trivy-results.sarif'
+          category: 'helm-trivy'
+
+  opa-policy-check:
+    name: OPA Policy Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+          chmod +x opa
+          sudo mv opa /usr/local/bin/
+
+      - name: Run OPA tests
+        run: |
+          opa test policies/ -v
+
+      - name: Format and check policies
+        run: |
+          opa fmt policies/ --check
+
+  dependency-check:
+    name: OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run dependency-check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          path: '.'
+          format: 'SARIF'
+          args: >
+            --enableExperimental
+            --scan .
+            --project "Radix HFT"
+
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'dependency-check-report.sarif'
+          category: 'dependency-check'
+
+  notify-slack:
+    name: Notify Security Results
+    runs-on: ubuntu-latest
+    needs: [trivy-fs-scan, gitleaks-scan]
+    if: always()
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Security Scan: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Security Scan Results*\n*Status:* ${{ job.status }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

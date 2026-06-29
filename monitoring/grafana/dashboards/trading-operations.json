@@ -1,0 +1,272 @@
+{
+  "title": "Radix HFT — Trading Operations",
+  "uid": "radix-hft-trading-ops",
+  "description": "Order throughput, fill rates, latency, error budget tracking",
+  "tags": ["radix-hft", "trading", "operations"],
+  "timezone": "utc",
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Error Budget Remaining (30d)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0 },
+              { "color": "yellow", "value": 25 },
+              { "color": "green",  "value": 50 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "slo:order_service:error_budget_remaining_pct_30d",
+          "legendFormat": "Budget remaining",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Order Throughput (5m)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "decimals": 0,
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "slo:order_service:throughput_5m",
+          "legendFormat": "Orders/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "P99 Latency (ms)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red",    "value": 100 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "slo:order_service:latency_p99_5m * 1000",
+          "legendFormat": "P99",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Error Rate (%)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red",    "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "slo:order_service:error_rate_5m * 100",
+          "legendFormat": "Error rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Order Processing Timeline",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Errors" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "Successes" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      },
+      "options": { "legend": { "calcs": ["mean", "max"] } },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"order-service\",status=\"201\"}[5m]))",
+          "legendFormat": "Successes",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"order-service\",status=~\"5..\"}[5m]))",
+          "legendFormat": "Errors",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Latency Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line" }
+        }
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "placement": "right" }
+      },
+      "targets": [
+        {
+          "expr": "slo:order_service:latency_p50_5m * 1000",
+          "legendFormat": "P50",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:order_service:latency_p99_5m * 1000",
+          "legendFormat": "P99",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:order_service:latency_p999_5m * 1000",
+          "legendFormat": "P99.9",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Risk Engine Check Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 5 },
+              { "color": "red",    "value": 10 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "slo:risk_engine:check_time_p95",
+          "legendFormat": "P95",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:risk_engine:check_time_p99",
+          "legendFormat": "P99",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Market Data Feed Lag",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red",    "value": 100 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "slo:market_data:feed_lag_p99_5m",
+          "legendFormat": "{{ feed }} P99",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Service Replica Status",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "fieldConfig": {
+        "defaults": { "custom": { "width": 150 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Ready %" }, "properties": [{ "id": "custom.displayMode", "value": "color-background" }] }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "1 - (slo:pod:replicas_desired - slo:pod:replicas_ready) / slo:pod:replicas_desired",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "deployment": "Service",
+              "Value": "Ready %",
+              "kubernetes_namespace": "Namespace"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

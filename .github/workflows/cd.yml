@@ -143,6 +143,12 @@ jobs:
           TOKEN=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
           echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+
       - name: Sync ArgoCD Application
         run: |
           argocd app sync trading-platform \

@@ -1,0 +1,144 @@
+global:
+  imageTag: "latest"
+  environment: prod
+  kafkaBrokers: "b-1.radix-hft-prod-kafka.kafka.us-east-1.amazonaws.com:9094,b-2.radix-hft-prod-kafka.kafka.us-east-1.amazonaws.com:9094,b-3.radix-hft-prod-kafka.kafka.us-east-1.amazonaws.com:9094"
+  dbHost: "radix-hft-prod-aurora.us-east-1.rds.amazonaws.com"
+  dbPort: 5432
+  dbName: "radix_hft"
+  redisHost: "radix-hft-prod-redis.cache.amazonaws.com"
+  redisPort: 6379
+
+orderService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  config:
+    maxOrdersPerSecond: 100000
+    riskCheckEnabled: true
+    journalingEnabled: true
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+  affinity: required
+
+marketDataService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 16Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 75
+
+riskEngine:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 8Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  config:
+    maxPositionUSD: 50000000
+    maxDailyLossUSD: 5000000
+    maxOrderSizeUSD: 1000000
+    varConfidenceLevel: 0.99
+    riskCheckTimeoutMs: 5
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+apiGateway:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  ingress:
+    enabled: true
+    annotations:
+      alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID"
+      alb.ingress.kubernetes.io/wafv2-acl-arn: "arn:aws:wafv2:us-east-1:ACCOUNT_ID:regional/webacl/radix-hft/WEBACL_ID"
+    hosts:
+      - host: api.radix-hft.com
+        paths:
+          - path: /
+            pathType: Prefix
+
+rollout:
+  strategy: canary
+  steps:
+    - setWeight: 5
+    - pause:
+        duration: 5m
+    - analysis:
+        templates:
+          - templateName: error-rate
+          - templateName: latency-p99
+    - setWeight: 25
+    - pause:
+        duration: 10m
+    - analysis:
+        templates:
+          - templateName: error-rate
+          - templateName: latency-p99
+    - setWeight: 100
+
+networkPolicies:
+  enabled: true
+
+serviceMesh:
+  enabled: true
+  provider: istio
+  mTLS: STRICT
+
+prometheus:
+  enabled: true
+  scrapeInterval: 15s
+
+grafana:
+  enabled: true
+  dashboards:
+    - trading-operations
+    - infrastructure
+    - slo-tracking
+
+prometheusRules:
+  enabled: true
+
+priorityClass:
+  create: true
+  name: trading-critical
+  value: 1000000
+  globalDefault: true
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone

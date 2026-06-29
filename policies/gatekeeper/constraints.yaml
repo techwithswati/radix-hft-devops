@@ -1,0 +1,234 @@
+---
+# ────────────────────────────────────────────────────
+# OPA Gatekeeper Constraint Templates & Constraints
+# ────────────────────────────────────────────────────
+
+# 1. Require resource requests and limits
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: require-resource-limits
+spec:
+  match:
+    excludedNamespaces: ["kube-system", "kube-public", "kube-node-lease"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    containers: ["*"]
+    excludedContainers: []
+
+# 2. Require non-root user
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredSecurityContext
+metadata:
+  name: require-non-root
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    runAsNonRoot: true
+
+# 3. Require read-only filesystem
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sReadonlyFilesystem
+metadata:
+  name: require-readonly-filesystem
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    excludedContainers: []
+
+# 4. Blacklist privileged containers
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sPrivilegedContainer
+metadata:
+  name: no-privileged-containers
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+
+# 5. Require liveness probe
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredProbes
+metadata:
+  name: require-liveness-probe
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    probeType: livenessProbe
+    excludedContainers: []
+
+# 6. Require readiness probe
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredProbes
+metadata:
+  name: require-readiness-probe
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    probeType: readinessProbe
+    excludedContainers: []
+
+# 7. Block privileged escalation
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockPrivilegeEscalation
+metadata:
+  name: no-privilege-escalation
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+
+# 8. Require image pull policy: Always
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredImagePullPolicy
+metadata:
+  name: require-always-imagepullpolicy
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    imagePullPolicy: Always
+
+# 9. Require allowed registries
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRegistries
+metadata:
+  name: allowed-registries
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    allowedRegistries:
+      - ghcr.io/radix-hft
+      - gcr.io
+      - docker.io
+      - quay.io
+      - k8s.gcr.io
+
+# 10. Require security context
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredSecurityContext
+metadata:
+  name: require-security-context
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    allowPrivilegeEscalation: false
+
+# 11. Block host namespace usage
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockHostNamespace
+metadata:
+  name: no-host-namespace
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+
+# 12. Require labels
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-pod-labels
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    labels:
+      - key: app
+      - key: version
+      - key: owner
+
+# 13. Require CPU/Memory limits
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: require-cpu-memory-limits
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    containers: ["*"]
+    requiredResources:
+      - cpu
+      - memory
+
+# 14. Enforce resource quotas per namespace
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResourceQuota
+metadata:
+  name: require-namespace-quota
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Namespace"]
+  parameters:
+    requireQuota: true
+
+# 15. Block host ports
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockHostPorts
+metadata:
+  name: no-host-ports
+spec:
+  match:
+    excludedNamespaces: ["kube-system"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]

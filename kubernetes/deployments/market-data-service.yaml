@@ -1,0 +1,141 @@
+##############################################################
+# Radix HFT — Market Data Service
+# High-throughput feed aggregator (1M+ msg/s)
+# Blue/Green deployment strategy
+##############################################################
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: market-data-service
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: market-data-service
+    app.kubernetes.io/component: market-data
+    app.kubernetes.io/part-of: radix-hft
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: market-data-service
+  strategy:
+    blueGreen:
+      activeService: market-data-service-active
+      previewService: market-data-service-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+  template:
+    metadata:
+      labels:
+        app: market-data-service
+        app.kubernetes.io/name: market-data-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: market-data-service
+      automountServiceAccountToken: true
+      priorityClassName: trading-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      nodeSelector:
+        role: market-data
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: market-data-service
+
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: market-data-service
+          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/radix-hft/market-data-service:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+            - name: websocket
+              containerPort: 8082
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: market-data-service-config
+            - secretRef:
+                name: market-data-secrets
+
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: 8Gi
+            limits:
+              cpu: "8000m"
+              memory: 32Gi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilitites:
+              drop: [ALL]
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 20"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/market-data
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: cache
+          emptyDir:
+            sizeLimit: 10Gi
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: market-data-service-pdb
+  namespace: trading
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: market-data-service

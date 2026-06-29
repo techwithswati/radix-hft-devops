@@ -1,0 +1,178 @@
+##############################################################
+# Radix HFT — Kubernetes Services
+# Stable + canary services for order-service
+# Active/preview services for Blue/Green deployments
+##############################################################
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service-stable
+  namespace: trading
+  labels:
+    app: order-service
+    role: stable
+    app.kubernetes.io/name: order-service
+spec:
+  type: ClusterIP
+  selector:
+    app: order-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: grpc
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  sessionAffinity: None
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service-canary
+  namespace: trading
+  labels:
+    app: order-service
+    role: canary
+spec:
+  type: ClusterIP
+  selector:
+    app: order-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: grpc
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data-service-active
+  namespace: trading
+  labels:
+    app: market-data-service
+    role: active
+spec:
+  type: ClusterIP
+  selector:
+    app: market-data-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: websocket
+      port: 8082
+      targetPort: 8082
+      protocol: TCP
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data-service-preview
+  namespace: trading
+  labels:
+    app: market-data-service
+    role: preview
+spec:
+  type: ClusterIP
+  selector:
+    app: market-data-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: websocket
+      port: 8082
+      targetPort: 8082
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-engine-active
+  namespace: trading
+  labels:
+    app: risk-engine
+    role: active
+spec:
+  type: ClusterIP
+  selector:
+    app: risk-engine
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+      protocol: TCP
+    - name: grpc
+      port: 9003
+      targetPort: 9003
+      protocol: TCP
+    - name: metrics
+      port: 9093
+      targetPort: 9093
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-engine-preview
+  namespace: trading
+  labels:
+    app: risk-engine
+    role: preview
+spec:
+  type: ClusterIP
+  selector:
+    app: risk-engine
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+      protocol: TCP
+    - name: grpc
+      port: 9003
+      targetPort: 9003
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: trading
+  labels:
+    app: api-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    - name: metrics
+      port: 9000
+      targetPort: 9000
+      protocol: TCP

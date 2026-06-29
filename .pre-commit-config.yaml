@@ -1,0 +1,112 @@
+repos:
+  # ────────────────────────────────────────────────────
+  # General hooks
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '.*(\.md|\.json)$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # ────────────────────────────────────────────────────
+  # YAML linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.32.0
+    hooks:
+      - id: yamllint
+        args: ['-d', '{extends: default, rules: {line-length: {max: 120}, indentation: {spaces: 2}}}']
+        files: |
+          (?x)^(
+            kubernetes/.*\.yaml|
+            helm/.*\.yaml|
+            argocd/.*\.yaml|
+            \.github/.*\.yaml|
+            monitoring/.*\.yaml
+          )$
+
+  # ────────────────────────────────────────────────────
+  # Terraform linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.83.0
+    hooks:
+      - id: terraform_fmt
+        args: ['-recursive']
+      - id: terraform_validate
+      - id: terraform_tflint
+        args: ['--config=.tflint.hcl']
+
+  # ────────────────────────────────────────────────────
+  # Docker linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.13.0
+    hooks:
+      - id: hadolint-docker
+        files: docker/.*/Dockerfile
+
+  # ────────────────────────────────────────────────────
+  # Shell script linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.5
+    hooks:
+      - id: shellcheck
+        files: scripts/.*\.sh$
+        args: ['--severity=warning']
+
+  # ────────────────────────────────────────────────────
+  # Markdown linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.35.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix']
+        files: '\.md$'
+
+  # ────────────────────────────────────────────────────
+  # JSON linting
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-jq
+    rev: v1.7.1
+    hooks:
+      - id: jq-format
+        files: '\.json$'
+        exclude: 'node_modules'
+
+  # ────────────────────────────────────────────────────
+  # Git hooks
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.12.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # ────────────────────────────────────────────────────
+  # Security scanning
+  # ────────────────────────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+default_language_version:
+  python: python3
+
+ci:
+  autofix_commit_msg: '[pre-commit.ci] auto fixes from pre-commit.com hooks'
+  autoupdate_branch: ''
+  autoupdate_schedule: weekly

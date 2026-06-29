@@ -1,0 +1,274 @@
+##############################################################
+# Prometheus Alert Rules — Radix HFT
+# SLO-based alerts with error budget tracking
+# Multi-window burn rate alerts to catch issues early
+##############################################################
+
+groups:
+  - name: trading-slo-alerts
+    interval: 30s
+    rules:
+      # ────────────────────────────────────────────────────
+      # Order Service SLO: 99.99% availability, P99 < 50ms
+      # ────────────────────────────────────────────────────
+      - alert: OrderServiceHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status=~"5.."}[5m]))
+          / sum(rate(http_requests_total{service="order-service"}[5m]))
+          > 0.001  # > 0.1%
+        for: 1m
+        labels:
+          severity: critical
+          service: order-service
+          slo: availability
+          pagerduty: "true"
+        annotations:
+          summary: "Order service error rate > 0.1% (SLO breach)"
+          description: "Error rate is {{ $value | humanizePercentage }} for last 5m"
+          runbook: "https://docs.radix-hft.com/runbooks/order-service-degradation"
+          dashboard: "https://grafana.radix-hft.com/d/trading-ops"
+
+      - alert: OrderServiceLatencyP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="order-service"}[5m]))
+            by (le)
+          ) > 0.050  # > 50ms
+        for: 2m
+        labels:
+          severity: warning
+          service: order-service
+          slo: latency
+        annotations:
+          summary: "Order service P99 latency > 50ms"
+          description: "P99 latency is {{ $value | humanizeDuration }}"
+
+      - alert: OrderServiceErrorBudgetBurn1h
+        expr: |
+          (
+            sum(rate(http_requests_total{service="order-service",status=~"5.."}[1h]))
+            / sum(rate(http_requests_total{service="order-service"}[1h]))
+          ) > (0.01 * 30/24)  # Consuming 30% daily budget in 1h → escalate
+        for: 5m
+        labels:
+          severity: critical
+          service: order-service
+          slo: error-budget-burn
+          pagerduty: "true"
+        annotations:
+          summary: "Order service burning error budget at 30x speed"
+          description: "Error budget burn is {{ $value }}"
+
+      # ────────────────────────────────────────────────────
+      # Market Data Service: 99.999% availability, lag < 100ms
+      # ────────────────────────────────────────────────────
+      - alert: MarketDataFeedLagHigh
+        expr: |
+          histogram_quantile(0.99, 
+            rate(market_data_feed_lag_milliseconds_bucket[1m])
+          ) > 100  # > 100ms
+        for: 30s
+        labels:
+          severity: critical
+          service: market-data-service
+          pagerduty: "true"
+        annotations:
+          summary: "Market data feed lag > 100ms (quote staleness risk)"
+          description: "Feed lag P99 is {{ $value }}ms for {{ $labels.feed }}"
+          runbook: "https://docs.radix-hft.com/runbooks/market-data-outage"
+
+      - alert: MarketDataFeedDisconnected
+        expr: |
+          absent(market_data_feed_connected{feed="nasdaq"}) > 0
+          or absent(market_data_feed_connected{feed="cme"}) > 0
+          or absent(market_data_feed_connected{feed="nyse"}) > 0
+        for: 10s
+        labels:
+          severity: critical
+          service: market-data-service
+          pagerduty: "true"
+        annotations:
+          summary: "Market data feed disconnected: {{ $labels.feed }}"
+          description: "Feed {{ $labels.feed }} has no recent heartbeat"
+
+      # ────────────────────────────────────────────────────
+      # Risk Engine: decision time < 5ms, 99% uptime
+      # ────────────────────────────────────────────────────
+      - alert: RiskEngineSlowChecks
+        expr: |
+          histogram_quantile(0.95,
+            rate(risk_check_duration_milliseconds_bucket[5m])
+          ) > 5.0  # > 5ms
+        for: 3m
+        labels:
+          severity: warning
+          service: risk-engine
+        annotations:
+          summary: "Risk engine check time > 5ms (may cause latency issues)"
+          description: "P95 check time is {{ $value }}ms"
+
+      - alert: RiskCheckFailures
+        expr: |
+          sum(rate(risk_check_failures_total[5m]))
+          by (service) > 0.01
+        for: 1m
+        labels:
+          severity: critical
+          service: risk-engine
+          pagerduty: "true"
+        annotations:
+          summary: "Risk checks failing for {{ $labels.service }}"
+          description: "Failure rate {{ $value | humanizePercentage }}"
+
+      # ────────────────────────────────────────────────────
+      # Kubernetes Infrastructure
+      # ────────────────────────────────────────────────────
+      - alert: PodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{namespace="trading"}[30m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} crashing in namespace {{ $labels.namespace }}"
+          description: "Restart rate {{ $value | humanizePercentage }}/min"
+
+      - alert: NodeMemoryPressure
+        expr: |
+          kube_node_status_condition{condition="MemoryPressure",status="true"} > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Node {{ $labels.node }} under memory pressure"
+
+      - alert: NodeDiskPressure
+        expr: |
+          kube_node_status_condition{condition="DiskPressure",status="true"} > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: kubernetes
+          pagerduty: "true"
+        annotations:
+          summary: "Node {{ $labels.node }} under disk pressure"
+
+      - alert: PersistentVolumeFillingUp
+        expr: |
+          (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full"
+
+      - alert: KubeHPAMaxedOut
+        expr: |
+          kube_horizontalpodautoscaler_status_current_replicas{namespace="trading"}
+          == kube_horizontalpodautoscaler_status_desired_replicas{namespace="trading"}
+          and kube_horizontalpodautoscaler_status_desired_replicas > 1
+        for: 15m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "HPA {{ $labels.horizontalpodautoscaler }} is at max replicas"
+          description: "Scaling is maxed out at {{ $value }} replicas"
+
+      # ────────────────────────────────────────────────────
+      # Database & Cache
+      # ────────────────────────────────────────────────────
+      - alert: AuroraCPUHigh
+        expr: |
+          aws_rds_cpuutilization_average{dbcluster_identifier=~"radix-hft.*"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Aurora CPU {{ $labels.dbcluster_identifier }} > 80%"
+
+      - alert: AuroraReplicaLag
+        expr: |
+          aws_rds_aurora_replica_lag{dbcluster_identifier=~"radix-hft.*"} > 0.1
+        for: 3m
+        labels:
+          severity: critical
+          component: database
+          pagerduty: "true"
+        annotations:
+          summary: "Aurora replica lag > 100ms"
+          description: "Replica lag is {{ $value | humanizeDuration }}"
+
+      - alert: RedisMemoryHigh
+        expr: |
+          aws_elasticache_database_memory_usage_percentage_average{cache_cluster_id=~"radix-hft.*"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis memory usage > 80%"
+
+      # ────────────────────────────────────────────────────
+      # Kafka
+      # ────────────────────────────────────────────────────
+      - alert: KafkaUnderReplicatedPartitions
+        expr: |
+          sum(kafka_server_replicamanager_underreplicatedpartitions) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: kafka
+          pagerduty: "true"
+        annotations:
+          summary: "Kafka has {{ $value }} under-replicated partitions"
+          description: "Data durability is at risk"
+
+      - alert: KafkaBrokerDown
+        expr: |
+          count(up{job="kafka"}) < 3
+        for: 1m
+        labels:
+          severity: critical
+          component: kafka
+          pagerduty: "true"
+        annotations:
+          summary: "Kafka brokers down (only {{ $value }} up)"
+
+      # ────────────────────────────────────────────────────
+      # Security & Compliance
+      # ────────────────────────────────────────────────────
+      - alert: CertificateExpiringSoon
+        expr: |
+          probe_ssl_earliest_cert_expiry - time() < 14*24*60*60  # < 14 days
+        for: 1h
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "TLS certificate expiring in {{ $value | humanizeDuration }}"
+
+      - alert: FailedAuthAttempts
+        expr: |
+          sum(rate(http_requests_total{status="401"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High rate of auth failures ({{ $value }}/min)"
+
+      # ────────────────────────────────────────────────────
+      # Watchdog (confirms alertmanager is alive)
+      # ────────────────────────────────────────────────────
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "This is a watchdog alert"
+          description: "Alertmanager is functioning correctly"

@@ -1,0 +1,137 @@
+##############################################################
+# Radix HFT — Risk Engine
+# Pre-trade risk checks: position limits, VaR, kill-switch
+# Blue/Green deployment for critical workload
+##############################################################
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: risk-engine
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: risk-engine
+    app.kubernetes.io/component: risk-management
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: risk-engine
+  strategy:
+    blueGreen:
+      activeService: risk-engine-active
+      previewService: risk-engine-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 30
+  template:
+    metadata:
+      labels:
+        app: risk-engine
+        app.kubernetes.io/name: risk-engine
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: risk-engine
+      automountServiceAccountToken: true
+      priorityClassName: trading-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      nodeSelector:
+        role: trading-critical
+
+      tolerations:
+        - key: workload
+          value: trading-critical
+          effect: NoSchedule
+
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [risk-engine]
+              topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: risk-engine
+          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/radix-hft/risk-engine:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8083
+              protocol: TCP
+            - name: grpc
+              containerPort: 9003
+              protocol: TCP
+            - name: metrics
+              containerPort: 9093
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: risk-engine-config
+            - secretRef:
+                name: risk-engine-secrets
+
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: 8Gi
+            limits:
+              cpu: "8000m"
+              memory: 16Gi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: risk-engine-pdb
+  namespace: trading
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: risk-engine

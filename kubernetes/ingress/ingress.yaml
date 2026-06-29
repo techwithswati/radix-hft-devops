@@ -1,0 +1,85 @@
+##############################################################
+# Radix HFT — AWS ALB Ingress
+# Routes: /v1/orders → order-service
+#         /v1/market-data → api-gateway
+#         /v1/risk → risk-engine
+##############################################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading-platform-ingress
+  namespace: trading
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID"
+    alb.ingress.kubernetes.io/tags: "Environment=prod,Project=radix-hft"
+    alb.ingress.kubernetes.io/load-balancer-attributes: |
+      idle_timeout.timeout_seconds=60,
+      routing.http2.enabled=true,
+      access_logs.s3.enabled=true
+      access_logs.s3.bucket=radix-hft-alb-logs-prod,
+      access_logs.s3.prefix=trading-platform
+    alb.ingress.kubernetes.io/group.name: radix-hft-prod
+    alb.ingress.kubernetes.io/group.order: "10"
+    alb.ingress.kubernetes.io/success-codes: "200,201,204,400,401,403,404"
+
+spec:
+  rules:
+    - host: api.radix-hft.com
+      http:
+        paths:
+          # Order Service endpoints
+          - path: /v1/orders
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8000
+
+          # Market Data endpoints
+          - path: /v1/market-data
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8000
+
+          # Risk Engine endpoints
+          - path: /v1/risk
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8000
+
+          # Health check endpoint
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8000
+
+          # Ready check endpoint
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8000
+
+  tls:
+    - hosts:
+        - api.radix-hft.com
+      secretName: api-radix-hft-tls
+      

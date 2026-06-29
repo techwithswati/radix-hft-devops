@@ -1,0 +1,164 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trading-platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: radix-hft
+  
+  source:
+    repoURL: https://github.com/radix-hft/radix-hft-devops.git
+    targetRevision: HEAD
+    path: helm/trading-platform
+    
+    helm:
+      releaseName: trading-platform
+      
+      # Use different values files per environment
+      valuesFiles:
+        - values.yaml
+        - values-{{ .Values.environment }}.yaml
+      
+      # Parameter overrides from ArgoCD sync
+      parameters:
+        - name: global.imageTag
+          value: $ARGOCD_APP_REVISION
+      
+      # Helm values as inline YAML
+      values: |
+        global:
+          environment: prod
+        orderService:
+          replicaCount: 3
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trading
+
+  # Sync policy: automatic with auto-prune and self-heal
+  syncPolicy:
+    automated:
+      prune: true           # Delete resources not in Git
+      selfHeal: true        # Reconcile drift every 3m
+      allowEmpty: false     # Prevent accidental deletions
+
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true      # Delete resources after new ones are healthy
+
+    # Progressive rollout with analysis
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Notifications and logging
+  info:
+    - name: Documentation
+      value: https://docs.radix-hft.com
+    - name: Slack Channel
+      value: '#trading-deployments'
+
+  # Revisions to track (for multi-source deployments)
+  sources:
+    - repoURL: https://github.com/radix-hft/radix-hft-devops.git
+      targetRevision: HEAD
+      path: helm/trading-platform
+
+---
+# ArgoCD Project restricts RBAC and allowed resources
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: radix-hft
+  namespace: argocd
+spec:
+  description: "Radix HFT production platform"
+  
+  sourceRepos:
+    - https://github.com/radix-hft/radix-hft-devops.git
+    - https://helm.traefik.io
+    - https://prometheus-community.github.io/helm-charts
+  
+  destinations:
+    - namespace: 'trading'
+      server: https://kubernetes.default.svc
+    - namespace: 'monitoring'
+      server: https://kubernetes.default.svc
+    - namespace: 'argocd'
+      server: https://kubernetes.default.svc
+    - namespace: 'istio-system'
+      server: https://kubernetes.default.svc
+
+  # Cluster resources allowed
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+    - group: 'policy'
+      kind: PodSecurityPolicy
+    - group: 'scheduling.k8s.io'
+      kind: PriorityClass
+
+  # Namespace resources allowed
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Deny certain risky resources
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: ResourceQuota
+    - group: ''
+      kind: LimitRange
+
+  # RBAC for deploy users
+  roles:
+    - name: deployer
+      policies:
+        - p, proj:radix-hft:deployer, applications, get, radix-hft/*, allow
+        - p, proj:radix-hft:deployer, applications, sync, radix-hft/*, allow
+        - p, proj:radix-hft:deployer, repositories, get, *, allow
+      jwtTokens:
+        - iat: 1735689600
+          exp: 2051049600
+
+    - name: viewer
+      policies:
+        - p, proj:radix-hft:viewer, applications, get, radix-hft/*, allow
+        - p, proj:radix-hft:viewer, repositories, get, *, allow
+      jwtTokens:
+        - iat: 1735689600
+          exp: 2051049600
+
+---
+# Notification rule — sync status to Slack
+apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  notifications:
+    enabled: true
+  
+  server:
+    extraArgs:
+      - --insecure
+  
+  # Webhook for GitHub push notifications
+  repositoryCredentials:
+    - url: https://github.com/radix-hft
+      passwordSecret:
+        name: github-creds
+        key: token
+      usernameSecret:
+        name: github-creds
+        key: username

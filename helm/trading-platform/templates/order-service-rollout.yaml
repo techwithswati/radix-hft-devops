@@ -1,0 +1,156 @@
+{{- if .Values.orderService.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/name: order-service
+    app.kubernetes.io/component: order-processing
+    team: trading-ops
+spec:
+  replicas: {{ .Values.orderService.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: order-service
+      {{- include "trading-platform.selectorLabels" . | nindent 6 }}
+
+  strategy:
+    {{- if eq .Values.rollout.strategy "canary" }}
+    canary:
+      steps:
+        {{- range .Values.rollout.steps }}
+        - {{ . | toYaml | nindent 10 }}
+        {{- end }}
+      analysis:
+        {{- if .Values.prometheusRules.enabled }}
+        templates:
+          - name: error-rate
+          - name: latency-p99
+        {{- end }}
+    {{- else }}
+    blueGreen:
+      activeService: order-service-active
+      previewService: order-service-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+    {{- end }}
+
+  template:
+    metadata:
+      labels:
+        app: order-service
+        {{- include "trading-platform.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: order-service
+      automountServiceAccountToken: true
+      priorityClassName: trading-critical
+      
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      {{- if .Values.orderService.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.orderService.nodeSelector | nindent 8 }}
+      {{- end }}
+
+      {{- if .Values.topologySpreadConstraints.enabled }}
+      {{- include "trading-platform.topologySpreadConstraints" . | nindent 6 }}
+      {{- end }}
+
+      {{- if .Values.orderService.affinity }}
+      affinity:
+        {{- if eq .Values.orderService.affinity "required" }}
+        {{- include "trading-platform.podAntiAffinity" . | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: [order-service]
+                topologyKey: kubernetes.io/hostname
+        {{- end }}
+      {{- end }}
+
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: order-service
+          image: "{{ include "trading-platform.image" (dict "registry" .Values.global.imageRegistry "repo" "radix-hft/order-service" "tag" .Values.orderService.image.tag "global" .Values.global) }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 9000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: order-service-config
+            - secretRef:
+                name: order-service-secrets
+                optional: true
+
+          resources: {{- toYaml .Values.orderService.resources | nindent 12 }}
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+
+{{- end }}

@@ -1,0 +1,167 @@
+##############################################################
+# Prometheus Recording Rules — Radix HFT
+# Pre-compute expensive aggregations for dashboards
+# SLO metrics, burn rates, latency percentiles
+##############################################################
+
+groups:
+  - name: slo-recording-rules
+    interval: 30s
+    rules:
+      # ────────────────────────────────────────────────────
+      # Order Service Error Rate — multi-window for burn rates
+      # ────────────────────────────────────────────────────
+      - record: slo:order_service:error_rate_5m
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status=~"5.."}[5m]))
+          / sum(rate(http_requests_total{service="order-service"}[5m]))
+
+      - record: slo:order_service:error_rate_1h
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status=~"5.."}[1h]))
+          / sum(rate(http_requests_total{service="order-service"}[1h]))
+
+      - record: slo:order_service:error_rate_6h
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status=~"5.."}[6h]))
+          / sum(rate(http_requests_total{service="order-service"}[6h]))
+
+      - record: slo:order_service:error_rate_30d
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status=~"5.."}[30d]))
+          / sum(rate(http_requests_total{service="order-service"}[30d]))
+
+      # ────────────────────────────────────────────────────
+      # Order Service Latency Percentiles
+      # ────────────────────────────────────────────────────
+      - record: slo:order_service:latency_p50_5m
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(http_request_duration_seconds_bucket{service="order-service"}[5m]))
+            by (le)
+          )
+
+      - record: slo:order_service:latency_p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="order-service"}[5m]))
+            by (le)
+          )
+
+      - record: slo:order_service:latency_p99_1h
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="order-service"}[1h]))
+            by (le)
+          )
+
+      - record: slo:order_service:latency_p999_5m
+        expr: |
+          histogram_quantile(0.999,
+            sum(rate(http_request_duration_seconds_bucket{service="order-service"}[5m]))
+            by (le)
+          )
+
+      # ────────────────────────────────────────────────────
+      # Order Service Throughput
+      # ────────────────────────────────────────────────────
+      - record: slo:order_service:throughput_5m
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status="201"}[5m]))
+
+      - record: slo:order_service:throughput_1h
+        expr: |
+          sum(rate(http_requests_total{service="order-service",status="201"}[1h]))
+
+      # ────────────────────────────────────────────────────
+      # Market Data Feed Lag
+      # ────────────────────────────────────────────────────
+      - record: slo:market_data:feed_lag_p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(market_data_feed_lag_milliseconds_bucket[5m]))
+            by (le, feed)
+          )
+
+      - record: slo:market_data:feed_lag_p999_5m
+        expr: |
+          histogram_quantile(0.999,
+            sum(rate(market_data_feed_lag_milliseconds_bucket[5m]))
+            by (le, feed)
+          )
+
+      # ────────────────────────────────────────────────────
+      # Risk Engine Check Time
+      # ────────────────────────────────────────────────────
+      - record: slo:risk_engine:check_time_p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(risk_check_duration_milliseconds_bucket[5m]))
+            by (le)
+          )
+
+      - record: slo:risk_engine:check_time_p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(risk_check_duration_milliseconds_bucket[5m]))
+            by (le)
+          )
+
+      # ────────────────────────────────────────────────────
+      # Error Budget — time remaining until SLO breach
+      # ────────────────────────────────────────────────────
+      - record: slo:order_service:error_budget_remaining_pct_30d
+        expr: |
+          max(0, (1 - (slo:order_service:error_rate_30d / 0.0001))) * 100
+
+      - record: slo:order_service:error_budget_consumed_pct_30d
+        expr: |
+          (slo:order_service:error_rate_30d / 0.0001) * 100
+
+      # ────────────────────────────────────────────────────
+      # Pod Replica Counts
+      # ────────────────────────────────────────────────────
+      - record: slo:pod:replicas_desired
+        expr: |
+          sum(kube_deployment_spec_replicas{namespace="trading"})
+          by (deployment)
+
+      - record: slo:pod:replicas_ready
+        expr: |
+          sum(kube_deployment_status_replicas_ready{namespace="trading"})
+          by (deployment)
+
+      - record: slo:pod:replicas_available
+        expr: |
+          sum(kube_deployment_status_replicas_available{namespace="trading"})
+          by (deployment)
+
+      # ────────────────────────────────────────────────────
+      # Infrastructure Aggregations
+      # ────────────────────────────────────────────────────
+      - record: infra:node:cpu_utilization_avg
+        expr: |
+          1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
+          by (node)
+
+      - record: infra:node:memory_utilization_pct
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+          by (instance)
+
+      - record: infra:pod:cpu_throttling_rate
+        expr: |
+          sum(rate(container_cpu_cfs_throttled_seconds_total[5m]))
+          by (pod, namespace)
+
+      # ────────────────────────────────────────────────────
+      # Kafka Metrics
+      # ────────────────────────────────────────────────────
+      - record: slo:kafka:consumer_lag_max
+        expr: |
+          sum(kafka_consumer_lag)
+          by (consumergroup, topic)
+
+      - record: slo:kafka:brokers_online
+        expr: |
+          count(up{job="kafka"})

@@ -1,72 +1,111 @@
-# Contributing to Radix HFT DevOps Platform
+# Contributing to Radix HFT
 
-## Branch Strategy (Trunk-Based Development)
+Thank you for your interest in contributing to the Radix HFT DevOps platform!
 
-```
-main (protected)
- └── feature/TICKET-description   (short-lived, < 2 days)
- └── fix/TICKET-description
- └── release/v1.2.0               (release branches only)
-```
+---
 
-**Rules:**
-- All changes via PR - no direct pushes to `main`.
-- PRs require 1 approval + passing CI.
-- Squash merge only.
-- Delete branches after merge.
+## Getting Started
 
-## Commit Convention (Conventional Commits)
-
-```
-<type>(<scope>): <subject>
-
-[optional body]
-
-[optional footer: TICKET-123]
-```
-
-**Types:** `feat` `fix` `docs` `style` `refactor` `perf` `test` `chore` `ci` `infra`
-
-**Example:**
-```
-feat(order-service): add TWAP execution algorithm.
-fix(terraform/eks): increase node group max to 16 for prod.
-ci(github-actions): add cosign image signing to build stage.
-infra(terraform): upgrade Aurora to PostgreSQL 16.2.
-perf(risk-engine): reduce VaR calculation from 8ms to 3ms.
-```
-
-## Local Development
-
+### 1. Fork & Clone
 ```bash
-brew install terraform kubectl helm argocd k6 hadolint yamllint
-brew install --cask docker
-pip install pre-commit
+git clone https://github.com/YOUR_USERNAME/radix-hft-devops.git
+cd radix-hft-devops
+git remote add upstream https://github.com/radix-hft/radix-hft-devops.git
+```
+
+### 2. Create a Branch
+```bash
+git checkout -b feature/your-feature-name
+# Branch naming: feature/, fix/, docs/, infra/, test/
+```
+
+### 3. Make Changes & Test
+```bash
+# Install pre-commit hooks
 pre-commit install
+
+# Run hooks before committing
+pre-commit run --all-files
+
+# Test locally
+bash scripts/smoke-tests.sh
 ```
 
-### Running tests locally
-
+### 4. Commit (Conventional Commits)
 ```bash
-# Terraform validation
-cd terraform/modules/eks && terraform init -backend=false && terraform validate
-
-# Helm lint
-helm lint ./helm/trading-platform --strict
-
-# OPA policies
-./opa eval --data policies/ --input kubernetes/ "data.radix.deny"
-
-# k6 load test (smoke)
-k6 run --vus 10 --duration 30s k6-tests/trading-load-test.js
+git commit -m "type(scope): description"
+# Examples: feat(order-service): add validation
+#           fix(risk-engine): correct calculation
+#           docs(runbooks): add troubleshooting
 ```
+
+### 5. Create Pull Request
+- Push to fork: `git push origin feature/your-feature-name`
+- Open PR on GitHub with filled template
+- Address review feedback
+- Merge once approved (Squash and Merge)
+
+---
+
+## Testing
+
+**Required before PR:**
+```bash
+yamllint kubernetes/**/*.yaml
+terraform validate terraform/
+shellcheck scripts/*.sh
+helm lint helm/trading-platform/
+bash scripts/smoke-tests.sh
+```
+
+---
+
+## Code Style
+
+- **YAML:** 2-space indentation
+- **Bash:** Use shellcheck
+- **Terraform:** Run `terraform fmt`
+- **Docker:** Follow best practices
+- **Helm:** Consistent templates
+
+---
+
+## Documentation
+
+Update when:
+- Adding features → Update README, docs/
+- Changing deployment → Update Helm docs
+- Operational changes → Add/update runbook
+
+Changelog is auto-generated from commit messages.
+
+---
 
 ## Pull Request Checklist
 
-- [ ] Conventional commit message.
-- [ ] Tests pass locally.
-- [ ] `terraform fmt` applied.
-- [ ] Helm chart updated if K8s manifests changed.
-- [ ] `CHANGELOG.md` updated for user-facing changes.
-- [ ] Runbook updated if operational behavior changed.
-- [ ] Security impact assessed.
+- [ ] Code follows style guidelines
+- [ ] All tests pass
+- [ ] Pre-commit hooks pass
+- [ ] Documentation updated
+- [ ] No breaking changes (or documented)
+- [ ] Commit messages are conventional
+
+---
+
+## Code Review
+
+**Authors:** Keep PRs focused, respond to feedback, be open to suggestions
+
+**Reviewers:** Be constructive, explain reasoning, test locally if possible
+
+---
+
+## Questions?
+
+- Check [docs/](./docs/)
+- Ask in #radix-devops Slack
+- Open an Issue
+
+---
+
+**Thank you for contributing! 🚀**

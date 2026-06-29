@@ -1,0 +1,176 @@
+{{- if .Values.prometheus.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: order-service
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: market-data-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: market-data-service
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: risk-engine
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: risk-engine
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-gateway
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+{{- end }}
+
+{{- if .Values.serviceMesh.enabled }}
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - order-service
+  http:
+    - route:
+        - destination:
+            host: order-service
+            port:
+              number: 8080
+          {{- if eq .Values.rollout.strategy "canary" }}
+          weight: 100
+        - destination:
+            host: order-service-canary
+            port:
+              number: 8080
+          weight: 0
+          {{- end }}
+      timeout: 5s
+      retries:
+        attempts: 3
+        perTryTimeout: 2s
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  host: order-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 10000
+      http:
+        http1MaxPendingRequests: 10000
+        maxRequestsPerConnection: 1000
+        h2UpgradePolicy: UPGRADE
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      minRequestVolume: 5
+      splitExternalLocalOriginErrors: true
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: {{ .Values.serviceMesh.mTLS }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  mtls:
+    mode: {{ .Values.serviceMesh.mTLS }}
+{{- end }}
+
+{{- if and .Values.prometheusRules.enabled (eq .Values.rollout.strategy "canary") }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: error-rate
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: error-rate
+      interval: 1m
+      count: 3
+      threshold: 1.0
+      failureLimit: 3
+      query: |
+        sum(rate(http_requests_total{job="{{`{{instance}}`}}",status=~"5.."}[2m]))
+        /
+        sum(rate(http_requests_total{job="{{`{{instance}}`}}"}[2m]))
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency-p99
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: latency-p99
+      interval: 1m
+      count: 3
+      threshold: 50.0
+      failureLimit: 2
+      query: |
+        histogram_quantile(0.99,
+          sum(rate(http_request_duration_seconds_bucket{job="{{`{{instance}}`}}"}[2m]))
+          by (le)
+        ) * 1000
+{{- end }}

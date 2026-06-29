@@ -1,0 +1,187 @@
+{{- if and .Values.orderService.enabled .Values.orderService.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: order-service
+  minReplicas: {{ .Values.orderService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.orderService.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.orderService.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.orderService.autoscaling.targetMemoryUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+      selectPolicy: Max
+{{- end }}
+
+---
+{{- if and .Values.marketDataService.enabled .Values.marketDataService.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: market-data-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: market-data-service
+  minReplicas: {{ .Values.marketDataService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.marketDataService.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.marketDataService.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 30
+      selectPolicy: Max
+{{- end }}
+
+---
+{{- if .Values.marketDataService.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: market-data-service-keda
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: market-data-service
+    kind: Rollout
+  minReplicaCount: {{ .Values.marketDataService.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.marketDataService.autoscaling.maxReplicas }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ .Values.global.kafkaBrokers }}
+        consumerGroup: market-data-consumer
+        topic: market-data
+        lagThreshold: "10000"
+        offsetReductionPercentage: "50"
+{{- end }}
+
+---
+{{- if and .Values.apiGateway.enabled .Values.apiGateway.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: {{ .Values.apiGateway.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.apiGateway.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.apiGateway.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+      selectPolicy: Max
+{{- end }}
+
+---
+{{- if .Values.orderService.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.orderService.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app: order-service
+{{- end }}
+
+---
+{{- if .Values.riskEngine.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: risk-engine
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.riskEngine.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app: risk-engine
+{{- end }}
+
+---
+{{- if .Values.priorityClass.create }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.priorityClass.name }}
+  labels: {{- include "trading-platform.labels" . | nindent 4 }}
+value: {{ .Values.priorityClass.value }}
+globalDefault: {{ .Values.priorityClass.globalDefault }}
+description: "Priority class for trading-critical workloads"
+{{- end }}

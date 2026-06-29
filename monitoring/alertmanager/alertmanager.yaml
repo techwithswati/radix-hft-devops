@@ -1,0 +1,152 @@
+##############################################################
+# AlertManager Configuration — Radix HFT
+# Routes: P0 → PagerDuty + Slack | P1 → Slack | P2 → Email
+##############################################################
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: "{{ SLACK_WEBHOOK_URL }}"
+  pagerduty_url: "https://events.pagerduty.com/v2/enqueue"
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'service', 'namespace']
+  group_wait: 15s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: slack-default
+  
+  routes:
+    # P0: Critical alerts with PagerDuty label → page immediately
+    - matchers:
+        - severity = "critical"
+        - pagerduty = "true"
+      receiver: pagerduty-critical
+      continue: true
+      repeat_interval: 30m
+
+    # P0: All critical alerts → Slack #trading-p0
+    - matchers:
+        - severity = "critical"
+      receiver: slack-critical
+      repeat_interval: 1h
+
+    # P1: Warnings → Slack #trading-alerts
+    - matchers:
+        - severity = "warning"
+      receiver: slack-warnings
+      repeat_interval: 6h
+
+    # Watchdog (always firing — confirms Alertmanager is alive)
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: "null"
+
+receivers:
+  - name: "null"
+
+  - name: slack-default
+    slack_configs:
+      - channel: '#trading-alerts'
+        username: 'Radix HFT Alertmanager'
+        icon_emoji: ':bell:'
+        send_resolved: true
+        title: '{{ template "slack.title" . }}'
+        text: |
+          *Service:* {{ (index .Alerts 0).Labels.service }}
+          *Summary:* {{ (index .Alerts 0).Annotations.summary }}
+          {{ if (index .Alerts 0).Annotations.description }}*Description:* {{ (index .Alerts 0).Annotations.description }}{{ end }}
+        actions:
+          - type: button
+            text: "Runbook"
+            url: '{{ (index .Alerts 0).Annotations.runbook }}'
+          - type: button
+            text: "Dashboard"
+            url: '{{ (index .Alerts 0).Annotations.dashboard }}'
+
+  - name: slack-critical
+    slack_configs:
+      - channel: '#trading-p0'
+        username: 'Radix HFT P0 Alert'
+        icon_emoji: ':rotating_light:'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: '🚨 P0: {{ template "slack.title" . }}'
+        text: |
+          *Status:* {{ .Status | toUpper }}
+          *Service:* {{ (index .Alerts 0).Labels.service }}
+          *Severity:* {{ (index .Alerts 0).Labels.severity }}
+          
+          *Summary:* {{ (index .Alerts 0).Annotations.summary }}
+          {{ if (index .Alerts 0).Annotations.description }}*Description:* {{ (index .Alerts 0).Annotations.description }}{{ end }}
+          
+          *Duration:* {{ (index .Alerts 0).StartsAt | since }}
+          *Instance:* {{ (index .Alerts 0).Labels.instance }}
+
+  - name: slack-warnings
+    slack_configs:
+      - channel: '#trading-alerts'
+        username: 'Radix HFT Alertmanager'
+        icon_emoji: ':warning:'
+        send_resolved: true
+        color: 'warning'
+        title: '⚠️ {{ template "slack.title" . }}'
+        text: |
+          *Service:* {{ (index .Alerts 0).Labels.service }}
+          *Summary:* {{ (index .Alerts 0).Annotations.summary }}
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "{{ PAGERDUTY_ROUTING_KEY }}"
+        severity: '{{ if eq (index .Alerts 0).Labels.severity "critical" }}critical{{ else }}warning{{ end }}'
+        description: '{{ (index .Alerts 0).Annotations.summary }}'
+        client: 'Radix HFT Alertmanager'
+        client_url: 'https://grafana.radix-hft.com/d/radix-hft-trading-ops'
+        details:
+          service: '{{ (index .Alerts 0).Labels.service }}'
+          namespace: '{{ (index .Alerts 0).Labels.namespace }}'
+          description: '{{ (index .Alerts 0).Annotations.description }}'
+          runbook: '{{ (index .Alerts 0).Annotations.runbook }}'
+          fired_at: '{{ (index .Alerts 0).StartsAt | since }}'
+
+  - name: email-p2
+    email_configs:
+      - to: 'alerts@radix-hft.com'
+        from: 'alertmanager@radix-hft.com'
+        smarthost: 'smtp.aws.com:587'
+        auth_username: 'alertmanager'
+        auth_password: '{{ SMTP_PASSWORD }}'
+        requireTLS: true
+        headers:
+          Subject: '[P2] {{ .GroupLabels.service }}: {{ .Alerts.Firing | len }} alerts'
+        text: |
+          Alert Summary:
+          {{ range .Alerts }}
+          - {{ .Labels.alertname }} ({{ .Labels.severity }})
+            Service: {{ .Labels.service }}
+            Summary: {{ .Annotations.summary }}
+          {{ end }}
+
+inhibit_rules:
+  # If node is down, suppress pod-level alerts from that node
+  - source_matchers:
+      - alertname = "NodeDown"
+    target_matchers:
+      - alertname =~ "Pod.*"
+    equal: ['node']
+
+  # Critical suppresses warning for same service
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['service', 'alertname']
+
+  # Suppress market data lag if feed is disconnected
+  - source_matchers:
+      - alertname = "MarketDataFeedDisconnected"
+    target_matchers:
+      - alertname = "MarketDataFeedLagHigh"
+    equal: ['feed']

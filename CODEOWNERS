@@ -1,0 +1,13 @@
+# DevOps team owns everything by default
+* @order-service-team @devops-team
+
+# Specific ownership
+/terraform/ @infrastructure-team
+/helm/ @devops-team
+/kubernetes/ @devops-team @sre-team
+/docker/ @backend-team
+/.github/workflows/ @devops-team
+/policies/ @security-team
+/monitoring/ @observability-team
+/docs/runbooks/ @sre-team @incident-commander
+/scripts/ @devops-team
